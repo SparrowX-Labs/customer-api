@@ -17,16 +17,16 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
 
 jobs:
-  pre-build:
-    name: Pre-Build
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/pre-build.yaml@v1.0.2
-    with:
-      env-params-file: helm-values-dev.yaml
+  # pre-build:
+  #   name: Pre-Build
+  #   uses: SparrowX-Labs/workflows-templates/.github/workflows/pre-build.yaml@v1.0.2
+  #   with:
+  #     env-params-file: helm-values-dev.yaml
 
   build:
     name: Build
-    needs: pre-build
-    if: needs.pre-build.outputs.build-needed == 'true'
+    # needs: pre-build
+    # if: needs.pre-build.outputs.build-needed == 'true'
     uses: SparrowX-Labs/workflows-templates/.github/workflows/build.yaml@v1.0.2
     with:
       env-params-file: helm-values-dev.yaml

@@ -1,0 +1,156 @@
+name: Manual Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type PROMOTE to confirm promotion to Production
+        required: true
+        type: string
+
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  confirm-promotion:
+    name: Confirm Production Promotion
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        if: inputs.confirmation != 'PROMOTE'
+        run: |
+          echo "Invalid confirmation."
+          echo "You must type PROMOTE to continue."
+          exit 1
+
+  deployment-guard:
+    name: Deployment Guard
+    needs: confirm-promotion
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/deployment-guard.yaml@v1.0.0
+    with:
+      env-params-file: ecs-parameters-prod.yaml
+      environment: prod
+
+  # Resolve the candidate image tag and digest from paramstore
+  # The Job has an internal validation logic, which will be run against the image on the dev ECR repo,
+  # before copying it to the prod ECR repo. This is to ensure consistency.
+  resolve-image:
+    name: Resolve Candidate Image
+    needs:
+      - confirm-promotion
+      - deployment-guard
+    if: needs.deployment-guard.outputs.deployment-enabled == 'true'
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.0.0
+    with:
+      ssm-parameter-path: ${{ vars.PROD_CANDIDATE_PARAM_STORE_PATH }}
+      env-params-file: helm-values-dev.yaml
+
+  # Promoting Image to Production ECR repo
+  copy-image:
+    name: Copy Image to Production ECR
+    needs:
+      - resolve-image
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/copy-image.yaml@v1.0.0
+    with:
+      image-tag: ${{ needs.resolve-image.outputs.image-tag }}
+      image-digest: ${{ needs.resolve-image.outputs.image-digest }}
+      source-env-params-file: helm-values-dev.yaml
+      target-env-params-file: ecs-parameters-prod.yaml
+
+  verify-target-image-signature:
+    name: Verify Target Image Signature
+    needs: copy-image
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/verify-image-signature.yaml@v1.0.0
+    with:
+      image-uri: ${{ needs.copy-image.outputs.image-uri }}
+
+  # Promoting Image to Production Deployment
+  promote:
+    name: Promote to Production
+    needs:
+      - verify-target-image-signature
+      - copy-image
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.0.0
+    with:
+      environment: prod
+      database-enabled: true
+      env-params-file: ecs-parameters-prod.yaml
+      image-tag: ${{ needs.copy-image.outputs.image-tag }}
+
+  # Run smoke tests against the deployed service.
+  smoke-test:
+    name: Smoke Test Production
+    needs: promote
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/smoke-test.yaml@v1.0.0
+    with:
+      env-params-file: ecs-parameters-prod.yaml
+      base-url: ${{ vars.PROD_BASE_URL }}
+      timeout: '120'
+
+  api-test:
+    name: Read-only Production API Tests
+    needs: smoke-test
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/api-test.yaml@v1.0.0
+    with:
+      runtime: python
+      base-url: ${{ vars.PROD_BASE_URL }}
+      test-path: api-tests/prod
+      test-command: pytest -q api-tests/prod
+      requirements-file: requirements-dev.txt
+
+  prod-quality-gate:
+    name: Prod Quality Gate
+    needs:
+      - smoke-test
+      - api-test
+    if: always()
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/prod-quality-gate.yaml@v1.0.0
+    with:
+      smoke-test-status: ${{ needs.smoke-test.outputs.status }}
+      api-test-status: ${{ needs.api-test.outputs.status }}
+
+  # Publish Image metadata only if production quality gate passes, marking a successful deployment
+  publish-image-metadata:
+    name: Publish Image Metadata
+    needs:
+      - prod-quality-gate
+      - copy-image
+    if: needs.prod-quality-gate.outputs.status == 'passed'
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/publish-image-metadata.yaml@v1.0.0
+    with:
+      ssm-parameter-path: ${{ vars.PROD_DEPLOYED_PARAM_STORE_PATH }}
+      env-params-file: ecs-parameters-prod.yaml
+      image-tag: ${{ needs.copy-image.outputs.image-tag }}
+      image-uri: ${{ needs.copy-image.outputs.image-uri }}
+
+  # Automated Rollback - In case production quality gate fails, restore the last known stable image.
+  resolve-previous-image:
+    name: Resolve Previous Production Image
+    needs:
+      - deployment-guard
+      - prod-quality-gate
+    if: >
+      needs.deployment-guard.outputs.deployment-enabled == 'true' &&
+      needs.prod-quality-gate.outputs.status == 'failed'
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.0.0
+    with:
+      ssm-parameter-path: ${{ vars.PROD_DEPLOYED_PARAM_STORE_PATH }}
+      env-params-file: ecs-parameters-prod.yaml
+
+  rollback:
+    name: Rollback Production
+    needs:
+      - resolve-previous-image
+      - prod-quality-gate
+    if: needs.prod-quality-gate.outputs.status == 'failed'
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.0.0
+    with:
+      environment: prod
+      database-enabled: true
+      env-params-file: ecs-parameters-prod.yaml
+      image-tag: ${{ needs.resolve-previous-image.outputs.image-tag }}

@@ -1,0 +1,51 @@
+projectName: sparrowx
+environment: dev
+
+serviceName: customer-api
+
+replicaCount: 1
+
+appPort: 8000
+# extraAnnotations:
+# extraLabels:
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 400m
+    memory: 1024Mi
+
+database:
+  enabled: true
+  name: customerdb
+  engine: postgres
+  port: 5432
+  host: customerdb-postgres.dev.sparrowx.internal
+
+servicemonitor:
+  enabled: true
+
+livenessProbe:
+  enabled: false
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: false
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 1
+  successThreshold: 1
+  failureThreshold: 3
+
+startupProbe:
+  enabled: false
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 1
+  failureThreshold: 30

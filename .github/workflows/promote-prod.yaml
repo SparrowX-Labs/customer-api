@@ -31,7 +31,7 @@ jobs:
   deployment-guard:
     name: Deployment Guard
     needs: confirm-promotion
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deployment-guard.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/deployment-guard.yaml@v1.1.2
     with:
       env-params-file: ecs-parameters-prod.yaml
       environment: prod
@@ -45,7 +45,7 @@ jobs:
       - confirm-promotion
       - deployment-guard
     if: needs.deployment-guard.outputs.deployment-enabled == 'true'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.1.2
     with:
       ssm-parameter-path: ${{ vars.PROD_CANDIDATE_PARAM_STORE_PATH }}
       env-params-file: helm-values-dev.yaml
@@ -55,7 +55,7 @@ jobs:
     name: Copy Image to Production ECR
     needs:
       - resolve-image
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/copy-image.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/copy-image.yaml@v1.1.2
     with:
       image-tag: ${{ needs.resolve-image.outputs.image-tag }}
       image-digest: ${{ needs.resolve-image.outputs.image-digest }}
@@ -65,7 +65,7 @@ jobs:
   verify-target-image-signature:
     name: Verify Target Image Signature
     needs: copy-image
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/verify-image-signature.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/verify-image-signature.yaml@v1.1.2
     with:
       image-uri: ${{ needs.copy-image.outputs.image-uri }}
 
@@ -75,7 +75,7 @@ jobs:
     needs:
       - verify-target-image-signature
       - copy-image
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.1.2
     with:
       environment: prod
       database-enabled: true
@@ -86,7 +86,7 @@ jobs:
   smoke-test:
     name: Smoke Test Production
     needs: promote
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/smoke-test.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/smoke-test.yaml@v1.1.2
     with:
       env-params-file: ecs-parameters-prod.yaml
       base-url: ${{ vars.PROD_BASE_URL }}
@@ -95,7 +95,7 @@ jobs:
   api-test:
     name: Read-only Production API Tests
     needs: smoke-test
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/api-test.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/api-test.yaml@v1.1.2
     with:
       runtime: python
       base-url: ${{ vars.PROD_BASE_URL }}
@@ -109,7 +109,7 @@ jobs:
       - smoke-test
       - api-test
     if: always()
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/prod-quality-gate.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/prod-quality-gate.yaml@v1.1.2
     with:
       smoke-test-status: ${{ needs.smoke-test.outputs.status }}
       api-test-status: ${{ needs.api-test.outputs.status }}
@@ -121,7 +121,7 @@ jobs:
       - prod-quality-gate
       - copy-image
     if: needs.prod-quality-gate.outputs.status == 'passed'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/publish-image-metadata.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/publish-image-metadata.yaml@v1.1.2
     with:
       ssm-parameter-path: ${{ vars.PROD_DEPLOYED_PARAM_STORE_PATH }}
       env-params-file: ecs-parameters-prod.yaml
@@ -137,7 +137,7 @@ jobs:
     if: >
       needs.deployment-guard.outputs.deployment-enabled == 'true' &&
       needs.prod-quality-gate.outputs.status == 'failed'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.1.2
     with:
       ssm-parameter-path: ${{ vars.PROD_DEPLOYED_PARAM_STORE_PATH }}
       env-params-file: ecs-parameters-prod.yaml
@@ -148,7 +148,7 @@ jobs:
       - resolve-previous-image
       - prod-quality-gate
     if: needs.prod-quality-gate.outputs.status == 'failed'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.1.2
     with:
       environment: prod
       database-enabled: true

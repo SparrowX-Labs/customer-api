@@ -19,7 +19,7 @@ env:
 jobs:
   # pre-build:
   #   name: Pre-Build
-  #   uses: SparrowX-Labs/workflows-templates/.github/workflows/pre-build.yaml@v1.1.1
+  #   uses: SparrowX-Labs/workflows-templates/.github/workflows/pre-build.yaml@v1.1.2
   #   with:
   #     env-params-file: helm-values-dev.yaml
 
@@ -27,7 +27,7 @@ jobs:
     name: Build
     # needs: pre-build
     # if: needs.pre-build.outputs.build-needed == 'true'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/build.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/build.yaml@v1.1.2
     with:
       env-params-file: helm-values-dev.yaml
       authoritative-build: true
@@ -35,7 +35,7 @@ jobs:
   image-security-scan:
     name: Image Security Scan
     needs: build
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/image-security-scan.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/image-security-scan.yaml@v1.1.2
     with:
       env-params-file: helm-values-dev.yaml
       image-tag: ${{ needs.build.outputs.image-tag }}
@@ -43,7 +43,7 @@ jobs:
   ci-quality-gate:
     name: CI Quality Gate
     needs: image-security-scan
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/ci-quality-gate.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/ci-quality-gate.yaml@v1.1.2
     with:
       image-security-artifact: ${{ needs.image-security-scan.outputs.artifact-name }}
       security-policy-file: app-sec-policy.yaml
@@ -53,7 +53,7 @@ jobs:
     needs:
       - ci-quality-gate
       - build
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/sign-image.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/sign-image.yaml@v1.1.2
     with:
       env-params-file: helm-values-dev.yaml
       image-tag: ${{ needs.build.outputs.image-tag }}
@@ -65,7 +65,7 @@ jobs:
       - sign-image
       - build
     if: needs.sign-image.outputs.status == 'passed'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/promote-image.yaml@v1.1.1
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/promote-image.yaml@v1.1.2
     with:
       env-params-file: helm-values-dev.yaml
       origin-image-tag: "git-sha"

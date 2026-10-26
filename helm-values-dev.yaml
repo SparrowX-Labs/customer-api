@@ -10,12 +10,7 @@ appPort: 8000
 # extraLabels:
 
 resources:
-  requests:
-    cpu: 200m
-    memory: 512Mi
-  limits:
-    cpu: 400m
-    memory: 1024Mi
+  size: medium
 
 database:
   enabled: true
@@ -27,25 +22,10 @@ database:
 servicemonitor:
   enabled: true
 
+probePath: /health
 livenessProbe:
-  enabled: false
-  initialDelaySeconds: 5
-  periodSeconds: 10
-  timeoutSeconds: 1
-  successThreshold: 1
-  failureThreshold: 3
-
+  enabled: true
 readinessProbe:
-  enabled: false
-  initialDelaySeconds: 5
-  periodSeconds: 5
-  timeoutSeconds: 1
-  successThreshold: 1
-  failureThreshold: 3
-
+  enabled: true
 startupProbe:
-  enabled: false
-  initialDelaySeconds: 0
-  periodSeconds: 10
-  timeoutSeconds: 1
-  failureThreshold: 30
+  enabled: true

@@ -1,0 +1,31 @@
+projectName: sparrowx
+environment: prod
+
+serviceName: customer-api
+
+replicaCount: 1
+
+appPort: 8000
+# extraAnnotations:
+# extraLabels:
+
+resources:
+  size: medium
+
+database:
+  enabled: true
+  name: customerdb
+  engine: postgres
+  port: 5432
+  host: customerdb-postgres.prod.sparrowx.internal
+
+servicemonitor:
+  enabled: true
+
+probePath: /health
+livenessProbe:
+  enabled: true
+readinessProbe:
+  enabled: true
+startupProbe:
+  enabled: true

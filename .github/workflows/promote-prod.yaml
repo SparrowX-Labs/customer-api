@@ -28,74 +28,49 @@ jobs:
           echo "You must type PROMOTE to continue."
           exit 1
 
-  deployment-guard:
-    name: Deployment Guard
-    needs: confirm-promotion
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deployment-guard.yaml@v1.1.3
-    with:
-      env-params-file: ecs-parameters-prod.yaml
-      environment: prod
-
-  # Resolve the candidate image tag and digest from paramstore
-  # The Job has an internal validation logic, which will be run against the image on the dev ECR repo,
-  # before copying it to the prod ECR repo. This is to ensure consistency.
-  resolve-image:
-    name: Resolve Candidate Image
-    needs:
-      - confirm-promotion
-      - deployment-guard
-    if: needs.deployment-guard.outputs.deployment-enabled == 'true'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.1.3
-    with:
-      ssm-parameter-path: ${{ vars.PROD_CANDIDATE_PARAM_STORE_PATH }}
-      env-params-file: helm-values-dev.yaml
-
   # Promoting Image to Production ECR repo
   copy-image:
     name: Copy Image to Production ECR
-    needs:
-      - resolve-image
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/copy-image.yaml@v1.1.3
+    needs: confirm-promotion
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/copy-image.yaml@v2.0.0
     with:
-      image-tag: ${{ needs.resolve-image.outputs.image-tag }}
-      image-digest: ${{ needs.resolve-image.outputs.image-digest }}
       source-env-params-file: helm-values-dev.yaml
-      target-env-params-file: ecs-parameters-prod.yaml
+      target-env-params-file: helm-values-prod.yaml
 
   verify-target-image-signature:
     name: Verify Target Image Signature
     needs: copy-image
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/verify-image-signature.yaml@v1.1.3
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/verify-image-signature.yaml@v2.0.0
     with:
-      image-uri: ${{ needs.copy-image.outputs.image-uri }}
+      env-params-file: helm-values-prod.yaml
+      image-tag: "prod-candidate"
 
-  # Promoting Image to Production Deployment
-  promote:
-    name: Promote to Production
-    needs:
-      - verify-target-image-signature
-      - copy-image
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.1.3
+  argosync-candidate:
+    name: argosync-candidate
+    needs: verify-target-image-signature
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/argosync.yaml@v2.0.0
     with:
       environment: prod
-      database-enabled: true
-      env-params-file: ecs-parameters-prod.yaml
-      image-tag: ${{ needs.copy-image.outputs.image-tag }}
+      env-params-file: helm-values-prod.yaml
+      image-tag: "prod-candidate"
+    secrets:
+      ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
 
   # Run smoke tests against the deployed service.
   smoke-test:
     name: Smoke Test Production
-    needs: promote
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/smoke-test.yaml@v1.1.3
+    needs: argosync-candidate
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/smoke-test.yaml@v2.0.0
     with:
-      env-params-file: ecs-parameters-prod.yaml
       base-url: ${{ vars.PROD_BASE_URL }}
+      health-path: ${{ vars.HEALTH_CHECK_PATH }}
       timeout: '120'
 
   api-test:
     name: Read-only Production API Tests
     needs: smoke-test
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/api-test.yaml@v1.1.3
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/api-test.yaml@v2.0.0
     with:
       runtime: python
       base-url: ${{ vars.PROD_BASE_URL }}
@@ -105,52 +80,55 @@ jobs:
 
   prod-quality-gate:
     name: Prod Quality Gate
-    needs:
-      - smoke-test
-      - api-test
+    needs: api-test
     if: always()
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/prod-quality-gate.yaml@v1.1.3
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/prod-quality-gate.yaml@v2.0.0
     with:
-      smoke-test-status: ${{ needs.smoke-test.outputs.status }}
       api-test-status: ${{ needs.api-test.outputs.status }}
 
-  # Publish Image metadata only if production quality gate passes, marking a successful deployment
-  publish-image-metadata:
-    name: Publish Image Metadata
-    needs:
-      - prod-quality-gate
-      - copy-image
+  #################################
+  # CASE: Quality Gate Passes !!! #
+  #################################
+  
+  # Promote Image to Prod Deployed
+  promote-image:
+    name: Promote Image
+    needs: prod-quality-gate
     if: needs.prod-quality-gate.outputs.status == 'passed'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/publish-image-metadata.yaml@v1.1.3
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/promote-image.yaml@v2.0.0
     with:
-      ssm-parameter-path: ${{ vars.PROD_DEPLOYED_PARAM_STORE_PATH }}
-      env-params-file: ecs-parameters-prod.yaml
-      image-tag: ${{ needs.copy-image.outputs.image-tag }}
-      image-uri: ${{ needs.copy-image.outputs.image-uri }}
+      env-params-file: helm-values-prod.yaml
+      origin-image-tag: "prod-candidate"
+      new-image-tag: "prod-deployed"
 
-  # Automated Rollback - In case production quality gate fails, restore the last known stable image.
-  resolve-previous-image:
-    name: Resolve Previous Production Image
-    needs:
-      - deployment-guard
-      - prod-quality-gate
-    if: >
-      needs.deployment-guard.outputs.deployment-enabled == 'true' &&
-      needs.prod-quality-gate.outputs.status == 'failed'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/resolve-image.yaml@v1.1.3
-    with:
-      ssm-parameter-path: ${{ vars.PROD_DEPLOYED_PARAM_STORE_PATH }}
-      env-params-file: ecs-parameters-prod.yaml
-
-  rollback:
-    name: Rollback Production
-    needs:
-      - resolve-previous-image
-      - prod-quality-gate
-    if: needs.prod-quality-gate.outputs.status == 'failed'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.1.3
+  #Update deployment to reflect the successful promotion status
+  argosync-deployed:
+    name: argosync-deployed
+    needs: promote-image
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/argosync.yaml@v2.0.0
     with:
       environment: prod
-      database-enabled: true
-      env-params-file: ecs-parameters-prod.yaml
-      image-tag: ${{ needs.resolve-previous-image.outputs.image-tag }}
+      env-params-file: helm-values-prod.yaml
+      image-tag: "prod-deployed"
+    secrets:
+      ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+
+  ################################
+  # CASE: Quality Gate Fails !!! #
+  ################################
+  # No Promotion 
+  # prod-deployed still preserves the current stable deployment artifact
+  # Rolling Back to the stable artifact
+  rollback:
+    name: rollback
+    needs: prod-quality-gate
+    if: needs.prod-quality-gate.outputs.status == 'failed'
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/argosync.yaml@v2.0.0
+    with:
+      environment: prod
+      env-params-file: helm-values-prod.yaml
+      image-tag: "prod-deployed"
+    secrets:
+      ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}

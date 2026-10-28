@@ -31,46 +31,27 @@ jobs:
           echo "You must type ROLLBACK to continue."
           exit 1
 
-  deployment-guard:
-    name: Deployment Guard
-    needs: confirm-rollback
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deployment-guard.yaml@v1.1.3
-    with:
-      env-params-file: ecs-parameters-prod.yaml
-      environment: prod
-
-  # Promoting Image to Production Deployment
+  # # Rolling Back to the stable artifact/state
+  # Suggested Image Tag: prod-previous
+  # Or any specific git-sha image tags for specific rollbacks to older deployemnts
   rollback:
-    name: Production Rollback
-    needs: 
-      - confirm-rollback
-      - deployment-guard
-    if: needs.deployment-guard.outputs.deployment-enabled == 'true'
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/deploy.yaml@v1.1.3
+    name: rollback
+    needs: confirm-rollback
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/argosync.yaml@v2.0.0
     with:
       environment: prod
-      database-enabled: true
-      env-params-file: ecs-parameters-prod.yaml
+      env-params-file: helm-values-prod.yaml
       image-tag: ${{ inputs.image-tag }}
-
+    secrets:
+      ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
 
   # Run smoke tests against the deployed service.
   smoke-test:
     name: Smoke Test Production
     needs: rollback
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/smoke-test.yaml@v1.1.3
+    uses: SparrowX-Labs/workflows-templates/.github/workflows/smoke-test.yaml@v2.0.0
     with:
-      env-params-file: ecs-parameters-prod.yaml
       base-url: ${{ vars.PROD_BASE_URL }}
+      health-path: ${{ vars.PROD_HEALTH_PATH }}
       timeout: '120'
-
-  # Publish Image metadata only if deployment and smoke tests are successful
-  # Image will be marked as candidate for promotion to production
-  publish-image-metadata:
-    name: Publish Image Metadata
-    needs: [smoke-test]
-    uses: SparrowX-Labs/workflows-templates/.github/workflows/publish-image-metadata.yaml@v1.1.3
-    with:
-      ssm-parameter-path: ${{ vars.PROD_DEPLOYED_PARAM_STORE_PATH }}
-      env-params-file: ecs-parameters-prod.yaml
-      image-tag: ${{ inputs.image-tag }}

@@ -1,0 +1,17 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: customer-api
+  description: customer-api service
+  annotations:
+    backstage.io/kubernetes-id: customer-api
+    github.com/project-slug: SparrowX-Labs/customer-api
+  tags:
+    - customer-api
+    - application
+    - backend
+spec:
+  type: service
+  lifecycle: experimental
+  owner: mohamed-awad
+  

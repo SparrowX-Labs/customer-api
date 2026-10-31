@@ -81,7 +81,6 @@ jobs:
   prod-quality-gate:
     name: Prod Quality Gate
     needs: api-test
-    if: always()
     uses: SparrowX-Labs/workflows-templates/.github/workflows/prod-quality-gate.yaml@v2.0.0
     with:
       api-test-status: ${{ needs.api-test.outputs.status }}
@@ -123,7 +122,9 @@ jobs:
   rollback:
     name: rollback
     needs: prod-quality-gate
-    if: needs.prod-quality-gate.outputs.status == 'failed'
+    if: |
+      failure() ||
+      needs.prod-quality-gate.outputs.status == 'failed'
     uses: SparrowX-Labs/workflows-templates/.github/workflows/argosync.yaml@v2.0.0
     with:
       environment: prod
